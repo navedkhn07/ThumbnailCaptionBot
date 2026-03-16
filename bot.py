@@ -7,9 +7,10 @@ Telegram Video Processor Bot — Final
 ✅ file_id reuse for video — zero bytes transferred
 ✅ @username replace + credit line
 ✅ Koi extra library nahi — sirf python-telegram-bot==22.x
+✅ Python 3.14 event loop fix
 """
 
-import os, re, json, logging
+import os, re, json, logging, asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -40,7 +41,7 @@ def save_config(cfg: dict):
 
 
 # ══════════════════════════════════════════════
-#  Caption + Entity processing  ← UNTOUCHED
+#  Caption + Entity processing
 # ══════════════════════════════════════════════
 def process_entities(caption: str, entities: list, my_username: str, keep_links: bool):
     if not caption:
@@ -94,17 +95,16 @@ def process_entities(caption: str, entities: list, my_username: str, keep_links:
         elif et == MessageEntity.TEXT_LINK:
             url = e["url"] or ""
             is_tme = "t.me/" in url or "telegram.me/" in url
-            out_text += chunk  # visible text hamesha rahega
+            out_text += chunk
             if keep_links and not is_tme:
                 out_ents.append(MessageEntity(type=MessageEntity.TEXT_LINK,
                     offset=cur_u16, length=to_u16len(chunk), url=url))
-            # is_tme=True: text rahega, sirf t.me link entity remove
 
         elif et == MessageEntity.URL:
             url = chunk
             is_tme = "t.me/" in url or "telegram.me/" in url
             if is_tme:
-                pass  # t.me URL: text bhi remove (URL entity mein text hi URL hoti hai)
+                pass
             elif keep_links:
                 out_text += chunk
                 out_ents.append(MessageEntity(type=MessageEntity.URL,
@@ -126,8 +126,6 @@ def process_entities(caption: str, entities: list, my_username: str, keep_links:
 
     out_text += caption[prev:]
 
-    # Plain text mein t.me links remove karo (e.g. "Dvruo.t.me" jo entity nahi hain)
-    # Pattern: kuch_bhi.t.me ya t.me/kuch_bhi — dono cases
     out_text = re.sub(r'\S+\.t\.me\S*', '', out_text)
     out_text = re.sub(r'https?://t\.me\S*', '', out_text)
     out_text = re.sub(r't\.me/\S*', '', out_text)
@@ -142,8 +140,6 @@ def process_entities(caption: str, entities: list, my_username: str, keep_links:
 
 # ══════════════════════════════════════════════
 #  Thumbnail cache helper
-#  Upload thumbnail once as photo → get file_id → cache it
-#  cover= parameter in PTB v22 accepts this file_id directly ✅
 # ══════════════════════════════════════════════
 async def get_thumbnail_file_id(context, chat_id: int, cfg: dict) -> str | None:
     cached = cfg.get("thumbnail_file_id")
@@ -327,8 +323,6 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ══════════════════════════════════════════════
 #  VIDEO HANDLER
-#  PTB v22 mein send_video ka naya `cover` parameter aaya hai
-#  cover= accepts file_id directly — thumbnail bilkul kaam karta hai!
 # ══════════════════════════════════════════════
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_config()
@@ -361,12 +355,10 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if thumb_ok:
-            # Get cached file_id for thumbnail (upload once, reuse forever)
             thumb_fid = await get_thumbnail_file_id(context, msg.chat_id, cfg)
 
             if thumb_fid:
                 if is_video:
-                    # PTB v22: cover= parameter accepts file_id — actually sets thumbnail!
                     await context.bot.send_video(
                         chat_id=msg.chat_id,
                         video=file_id,
@@ -414,7 +406,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ══════════════════════════════════════════════
-#  Main
+#  Main — Python 3.14 event loop fix applied
 # ══════════════════════════════════════════════
 def main():
     token = os.environ.get("BOT_TOKEN")
@@ -427,6 +419,10 @@ def main():
                     break
     if not token:
         raise ValueError("BOT_TOKEN not set! Add to .env:  BOT_TOKEN=your_token")
+
+    # ✅ Fix for Python 3.10+ / 3.14 — explicitly create and set a new event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     app = Application.builder().token(token).build()
 
