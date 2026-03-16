@@ -1,0 +1,6 @@
+```
+.env
+config.json
+thumbnails/
+*.session
+__pycache__/
